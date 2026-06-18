@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ACU Pack Monitor</title>
+<style>
+  :root{
+    --bg:#070b14; --bg2:#0c1322; --panel:rgba(20,30,50,.55); --panel2:rgba(14,22,38,.7);
+    --line:rgba(120,160,220,.14); --txt:#cfe0ff; --dim:#7da0c8; --dimmer:#4c6486;
+    --cyan:#28e0d8; --green:#1fd47a; --amber:#ffc24b; --red:#ff5b6e; --blue:#3a7bff;
+    --glow:0 0 18px rgba(40,224,216,.35);
+    font-synthesis:none;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1200px 700px at 80% -10%, rgba(40,120,255,.10), transparent 60%),
+      radial-gradient(900px 600px at -10% 110%, rgba(40,224,216,.08), transparent 55%),
+      var(--bg);
+    color:var(--txt);
+    font-family:"Segoe UI",system-ui,-apple-system,sans-serif;
+    font-size:13px; -webkit-font-smoothing:antialiased; overflow-x:hidden;
+  }
+  .mono{font-family:"Cascadia Code","Consolas",ui-monospace,monospace}
+  #app{max-width:1500px;margin:0 auto;padding:14px 18px 40px}
+
+  /* header */
+  header{
+    display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+    padding:14px 18px;margin-bottom:14px;border:1px solid var(--line);border-radius:16px;
+    background:linear-gradient(120deg,var(--panel),var(--panel2));backdrop-filter:blur(8px);
+    position:relative;overflow:hidden;
+  }
+  header::after{ /* charging energy sweep */
+    content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+    background:linear-gradient(90deg,transparent,rgba(31,212,122,.10),transparent);
+    background-size:40% 100%;background-repeat:no-repeat;
+    animation:sweep 3.4s linear infinite;
+  }
+  body.chg header::after{animation-duration:1.7s}
+  @keyframes sweep{0%{background-position:-40% 0}100%{background-position:140% 0}}
+  .brand{display:flex;flex-direction:column;gap:2px;z-index:1}
+  .brand h1{margin:0;font-size:18px;letter-spacing:3px;font-weight:700}
+  .brand .sub{font-size:10.5px;letter-spacing:2px;color:var(--dim);text-transform:uppercase}
+  .spacer{flex:1}
+  .pill{display:flex;align-items:center;gap:8px;padding:7px 13px;border-radius:999px;
+    border:1px solid var(--line);background:rgba(0,0,0,.25);z-index:1;white-space:nowrap}
+  .pill .k{color:var(--dim);font-size:10px;letter-spacing:1px;text-transform:uppercase}
+  .pill .v{font-weight:700;letter-spacing:.5px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--dimmer);box-shadow:0 0 0 0 rgba(0,0,0,0)}
+  .dot.on{background:var(--green);box-shadow:0 0 10px var(--green);animation:pulse 1.6s infinite}
+  .dot.off{background:var(--red);box-shadow:0 0 10px var(--red)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+  .state-badge{font-weight:800;letter-spacing:2px;padding:8px 16px;border-radius:10px;z-index:1;
+    border:1px solid var(--line);text-transform:uppercase}
+  .st-CHARGE{color:#06210f;background:linear-gradient(120deg,var(--green),#7bffb0);box-shadow:0 0 22px rgba(31,212,122,.5)}
+  .st-PRECHARGE{color:#241a00;background:linear-gradient(120deg,var(--amber),#ffe09a)}
+  .st-NORMAL{color:#05122b;background:linear-gradient(120deg,var(--cyan),#8af6f0)}
+  .st-INIT{color:#fff;background:rgba(58,123,255,.25);border-color:var(--blue)}
+  .st-SHITDOWN,.st-SHUTDOWN{color:#fff;background:linear-gradient(120deg,var(--red),#ff9aa6)}
+  .st-OFFLINE{color:var(--dim);background:rgba(255,255,255,.05)}
+
+  /* layout */
+  .grid{display:grid;grid-template-columns:1fr 340px;gap:14px}
+  @media(max-width:1100px){.grid{grid-template-columns:1fr}}
+  .col{display:flex;flex-direction:column;gap:14px;min-width:0}
+  .card{border:1px solid var(--line);border-radius:16px;padding:14px 16px;
+    background:linear-gradient(150deg,var(--panel),var(--panel2));backdrop-filter:blur(7px)}
+  .card h2{margin:0 0 12px;font-size:11px;letter-spacing:2.5px;color:var(--dim);
+    text-transform:uppercase;font-weight:700;display:flex;align-items:center;gap:8px}
+  .card h2 .right{margin-left:auto;color:var(--dimmer);font-weight:600;letter-spacing:1px}
+
+  /* metric tiles */
+  .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+  .metric{border:1px solid var(--line);border-radius:13px;padding:11px 13px;background:rgba(0,0,0,.22);
+    position:relative;overflow:hidden}
+  .metric .label{font-size:10px;letter-spacing:1.2px;color:var(--dim);text-transform:uppercase}
+  .metric .val{font-size:24px;font-weight:800;letter-spacing:.5px;margin-top:3px}
+  .metric .val small{font-size:12px;font-weight:600;color:var(--dim);margin-left:3px}
+  .metric .bar{height:4px;border-radius:3px;background:rgba(255,255,255,.08);margin-top:9px;overflow:hidden}
+  .metric .bar i{display:block;height:100%;border-radius:3px;transition:width .4s ease,background .4s}
+
+  /* cell matrix */
+  .matrix-head{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .toggle{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .toggle button{background:transparent;color:var(--dim);border:0;padding:6px 13px;cursor:pointer;
+    font-size:11px;letter-spacing:1px;font-weight:700;transition:.2s}
+  .toggle button.active{background:rgba(40,224,216,.16);color:var(--cyan)}
+  .legend{display:flex;align-items:center;gap:7px;margin-left:auto;color:var(--dim);font-size:10.5px}
+  .legend .scale{width:120px;height:9px;border-radius:5px}
+  .ic-row{display:grid;grid-template-columns:46px repeat(14,1fr) 62px;gap:5px;align-items:center;margin-bottom:5px}
+  .ic-tag{font-size:10px;letter-spacing:1px;color:var(--dim);font-weight:700}
+  .ic-tag b{color:var(--txt)}
+  .cell{position:relative;height:34px;border-radius:7px;border:1px solid rgba(255,255,255,.06);
+    display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;
+    color:rgba(255,255,255,.92);cursor:default;transition:background .45s ease, box-shadow .3s;
+    text-shadow:0 1px 2px rgba(0,0,0,.6)}
+  .cell.bal{border-color:rgba(255,255,255,.55)}
+  .cell.bal::after{content:"";position:absolute;inset:0;border-radius:7px;
+    box-shadow:inset 0 0 0 2px rgba(255,255,255,.65);animation:balpulse 1s ease-in-out infinite;pointer-events:none}
+  .cell.bal::before{content:"⚡";position:absolute;top:1px;right:3px;font-size:9px;opacity:.9;
+    animation:balpulse 1s ease-in-out infinite}
+  @keyframes balpulse{0%,100%{opacity:.35}50%{opacity:1}}
+  .cell .hov{display:none}
+  .ic-stack{font-size:10px;text-align:right;color:var(--dim);font-weight:700}
+  .ic-stack b{color:var(--cyan)}
+  .col-head{display:grid;grid-template-columns:46px repeat(14,1fr) 62px;gap:5px;margin-bottom:6px}
+  .col-head span{font-size:9px;color:var(--dimmer);text-align:center;font-weight:700}
+  /* tooltip */
+  #tip{position:fixed;z-index:50;pointer-events:none;display:none;padding:8px 11px;border-radius:9px;
+    background:rgba(8,14,26,.96);border:1px solid var(--line);box-shadow:0 8px 30px rgba(0,0,0,.6);
+    font-size:11px;line-height:1.5;white-space:nowrap}
+  #tip b{color:var(--cyan)}
+
+  /* relays / status */
+  .relays{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .relay{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:11px;
+    border:1px solid var(--line);background:rgba(0,0,0,.22)}
+  .relay .nm{font-weight:700;letter-spacing:.5px}
+  .relay .stt{margin-left:auto;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--dim)}
+  .lamp{width:14px;height:14px;border-radius:50%;background:var(--dimmer);position:relative;flex:none}
+  .lamp.on{background:var(--green);box-shadow:0 0 12px var(--green)}
+  .lamp.off{background:#33425e}
+  .lamp.fault{background:var(--red);box-shadow:0 0 12px var(--red);animation:pulse 1s infinite}
+  .lamp.warn{background:var(--amber);box-shadow:0 0 12px var(--amber)}
+  .kv{display:grid;grid-template-columns:1fr auto;gap:6px 10px;margin-top:11px}
+  .kv .k{color:var(--dim);font-size:11px}
+  .kv .v{font-weight:700;text-align:right}
+  .kv .v.mono{font-size:12px}
+
+  /* charts */
+  .charts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:560px){.charts{grid-template-columns:1fr}}
+  .chart{border:1px solid var(--line);border-radius:12px;padding:9px 10px 6px;background:rgba(0,0,0,.22)}
+  .chart .ct{display:flex;justify-content:space-between;font-size:10px;letter-spacing:1px;
+    color:var(--dim);text-transform:uppercase;font-weight:700;margin-bottom:4px}
+  .chart .ct b{color:var(--txt);font-size:13px;letter-spacing:0}
+  canvas{display:block;width:100%;height:54px}
+
+  /* console */
+  .cmdrow{display:flex;gap:8px;margin-bottom:10px}
+  .cmdrow input{flex:1;background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:9px;
+    color:var(--txt);padding:9px 12px;font-family:inherit;font-size:13px;outline:none}
+  .cmdrow input:focus{border-color:var(--cyan);box-shadow:var(--glow)}
+  .btn{border:1px solid var(--line);background:rgba(40,224,216,.12);color:var(--cyan);
+    border-radius:9px;padding:9px 14px;cursor:pointer;font-weight:700;letter-spacing:.5px;
+    font-size:12px;transition:.15s;white-space:nowrap}
+  .btn:hover{background:rgba(40,224,216,.22);box-shadow:var(--glow)}
+  .btn.warn{color:var(--amber);background:rgba(255,194,75,.1);border-color:rgba(255,194,75,.25)}
+  .btn.warn:hover{background:rgba(255,194,75,.2)}
+  .btn.danger{color:var(--red);background:rgba(255,91,110,.1);border-color:rgba(255,91,110,.28)}
+  .btn.danger:hover{background:rgba(255,91,110,.22)}
+  .btn.ghost{color:var(--dim);background:rgba(255,255,255,.04)}
+  .quick{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:11px}
+  .ov-note{font-size:10.5px;color:var(--dimmer);margin:-4px 0 10px}
+  .chg-ctl{display:flex;align-items:center;gap:11px;margin-bottom:11px;padding:10px 12px;
+    border:1px solid var(--line);border-radius:11px;background:rgba(0,0,0,.2)}
+  .chg-ctl input[type=range]{flex:1;accent-color:var(--green)}
+  .chg-ctl .amt{font-weight:800;font-size:16px;min-width:62px;text-align:right;color:var(--green)}
+  #log{height:150px;overflow:auto;border:1px solid var(--line);border-radius:10px;
+    background:rgba(0,0,0,.32);padding:8px 10px;font-size:11.5px;line-height:1.55}
+  #log .ln{white-space:pre-wrap;word-break:break-word}
+  #log .t{color:var(--dimmer);margin-right:7px}
+  .tx{color:var(--cyan)} .rx{color:var(--dim)} .err{color:var(--red)} .sys{color:var(--green)}
+  .badge-count{font-weight:800}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand">
+      <h1>⚡ ACU PACK MONITOR</h1>
+      <div class="sub">Accumulator · 10×14 · live telemetry</div>
+    </div>
+    <div class="state-badge st-OFFLINE" id="stateBadge">OFFLINE</div>
+    <div class="spacer"></div>
+    <div class="pill"><span class="dot" id="connDot"></span><span class="k">link</span><span class="v" id="connTxt">connecting…</span></div>
+    <div class="pill"><span class="k">uptime</span><span class="v mono" id="uptime">—</span></div>
+    <div class="pill"><span class="k">loop</span><span class="v mono" id="cps">—</span></div>
+  </header>
+
+  <div class="grid">
+    <!-- LEFT -->
+    <div class="col">
+      <div class="card">
+        <h2>Pack Overview</h2>
+        <div class="metrics" id="metrics"></div>
+      </div>
+
+      <div class="card">
+        <h2>Cell Matrix <span class="right" id="balCount"></span></h2>
+        <div class="matrix-head">
+          <div class="toggle">
+            <button id="modeV" class="active" onclick="setMode('v')">STATE OF CHARGE</button>
+            <button id="modeT" onclick="setMode('t')">TEMPERATURE</button>
+          </div>
+          <div class="legend">
+            <span id="legLo">—</span>
+            <div class="scale" id="legScale"></div>
+            <span id="legHi">—</span>
+          </div>
+        </div>
+        <div class="col-head" id="colHead"></div>
+        <div id="matrix"></div>
+      </div>
+
+      <div class="card">
+        <h2>Trends</h2>
+        <div class="charts">
+          <div class="chart"><div class="ct"><span>Pack Voltage</span><b id="cV">—</b></div><canvas id="chV"></canvas></div>
+          <div class="chart"><div class="ct"><span>Pack Current</span><b id="cI">—</b></div><canvas id="chI"></canvas></div>
+          <div class="chart"><div class="ct"><span>Max Cell Temp</span><b id="cT">—</b></div><canvas id="chT"></canvas></div>
+          <div class="chart"><div class="ct"><span>Cell Δ (mV)</span><b id="cD">—</b></div><canvas id="chD"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT -->
+    <div class="col">
+      <div class="card">
+        <h2>Relays &amp; Shutdown Circuit</h2>
+        <div class="relays" id="relays"></div>
+        <div class="kv" id="statusKv"></div>
+      </div>
+
+      <div class="card">
+        <h2>Faults <span class="right" id="faultRight">monitoring</span></h2>
+        <div class="kv" id="faults"></div>
+      </div>
+
+      <div class="card">
+        <h2>Command Console</h2>
+        <div class="cmdrow">
+          <input id="cmd" class="mono" placeholder="type a command + Enter…" autocomplete="off" spellcheck="false"/>
+          <button class="btn" onclick="sendInput()">SEND</button>
+        </div>
+        <div class="ov-note">State commands require <b>state override</b> enabled first.</div>
+        <div class="quick">
+          <button class="btn" onclick="send('override -s 1')">🔓 Override ON</button>
+          <button class="btn ghost" onclick="send('override -s 0')">🔒 Override OFF</button>
+          <button class="btn warn" onclick="send('override -e 1')">Err-Ovr ON</button>
+          <button class="btn ghost" onclick="send('override -e 0')">Err-Ovr OFF</button>
+        </div>
+        <div class="quick">
+          <button class="btn ghost" onclick="send('state -i')">INIT</button>
+          <button class="btn warn" onclick="send('state -p')">PRECHARGE</button>
+          <button class="btn" onclick="sendCharge()">CHARGE</button>
+          <button class="btn ghost" onclick="send('state -n')">NORMAL</button>
+          <button class="btn danger" onclick="send('state -s')">SHUTDOWN</button>
+        </div>
+        <div class="chg-ctl">
+          <span style="color:var(--dim);font-size:11px;letter-spacing:1px">CHG&nbsp;A</span>
+          <input type="range" id="chgRange" min="0" max="14" step="0.1" value="10" oninput="updateAmt()"/>
+          <span class="amt" id="chgAmt">10.0A</span>
+        </div>
+        <div id="log"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="tip"></div>
+
+<script>
+//================ config ================
+const NCELLS = 14;
+const TEMP_LO = 20, TEMP_HI = 60; // fixed °C range for the heatmap colour scale
+let mode = 'v';                 // 'v' | 't'
+let lastFrame = null;
+const PALETTE  = [[27,42,107],[31,120,200],[31,212,122],[245,208,32],[255,91,110]]; // blue->...->red (temp heat)
+const SOC_PAL  = [[255,91,110],[245,158,66],[245,210,70],[120,210,90],[31,212,122]]; // red->...->green (SoC)
+
+//================ helpers ================
+const $ = id => document.getElementById(id);
+function lerp(a,b,t){return a+(b-a)*t}
+function pal(arr,t){ // t in 0..1 -> rgb string, interpolated across the given palette
+  t = Math.max(0,Math.min(1,t));
+  const seg = t*(arr.length-1); const i = Math.floor(seg); const f = seg-i;
+  const a = arr[i], b = arr[Math.min(i+1,arr.length-1)];
+  return `rgb(${Math.round(lerp(a[0],b[0],f))},${Math.round(lerp(a[1],b[1],f))},${Math.round(lerp(a[2],b[2],f))})`;
+}
+const palette = t => pal(PALETTE,t);   // temperature heat scale
+const socCol  = t => pal(SOC_PAL,t);   // state-of-charge red->green scale
+function fmt(x,d=2){return (x==null||isNaN(x))?'—':Number(x).toFixed(d)}
+function hhmmss(ms){ if(ms==null)return '—'; let s=Math.floor(ms/1000);
+  const h=Math.floor(s/3600);s%=3600;const m=Math.floor(s/60);s%=60;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;}
+
+// rough NMC OCV -> SoC (estimate only; inflated under charge)
+const OCV=[[3.0,2],[3.30,10],[3.45,20],[3.55,30],[3.62,40],[3.68,50],[3.75,60],[3.85,70],[3.95,80],[4.05,90],[4.15,98],[4.20,100]];
+function soc(v){ if(v<=OCV[0][0])return 0; if(v>=OCV[OCV.length-1][0])return 100;
+  for(let i=0;i<OCV.length-1;i++){const[a,sa]=OCV[i],[b,sb]=OCV[i+1]; if(v>=a&&v<=b)return lerp(sa,sb,(v-a)/(b-a));} return 0;}
+
+//================ build static DOM ================
+(function buildHead(){
+  const ch=$('colHead'); ch.innerHTML='<span></span>'+Array.from({length:NCELLS},(_,i)=>`<span>${i}</span>`).join('')+'<span>Σ</span>';
+})();
+function buildMatrix(){
+  const m=$('matrix'); m.innerHTML='';
+  for(let ic=0; ic<10; ic++){
+    const row=document.createElement('div'); row.className='ic-row';
+    row.innerHTML=`<div class="ic-tag">IC<b>${ic}</b></div>`+
+      Array.from({length:NCELLS},(_,c)=>`<div class="cell" id="c${ic}_${c}" data-ic="${ic}" data-c="${c}"></div>`).join('')+
+      `<div class="ic-stack" id="stk${ic}">—</div>`;
+    m.appendChild(row);
+  }
+  // tooltip handlers (event delegation)
+  m.addEventListener('mousemove',e=>{
+    const el=e.target.closest('.cell'); const tip=$('tip');
+    if(!el||!el.dataset.info){tip.style.display='none';return;}
+    tip.innerHTML=el.dataset.info; tip.style.display='block';
+    let x=e.clientX+14,y=e.clientY+14;
+    if(x+tip.offsetWidth>innerWidth)x=e.clientX-tip.offsetWidth-14;
+    if(y+tip.offsetHeight>innerHeight)y=e.clientY-tip.offsetHeight-14;
+    tip.style.left=x+'px'; tip.style.top=y+'px';
+  });
+  m.addEventListener('mouseleave',()=>$('tip').style.display='none');
+}
+buildMatrix();
+
+//================ metrics & legend ================
+function metricTile(label,val,unit,frac,col){
+  return `<div class="metric"><div class="label">${label}</div>
+    <div class="val">${val}<small>${unit||''}</small></div>
+    <div class="bar"><i style="width:${Math.max(0,Math.min(100,frac*100))}%;background:${col}"></i></div></div>`;
+}
+
+function render(fr){
+  lastFrame=fr;
+  // ---- state badge / charging class ----
+  const st=(fr.state||'OFFLINE').toUpperCase();
+  const badge=$('stateBadge'); badge.textContent=st; badge.className='state-badge st-'+st;
+  document.body.classList.toggle('chg', st==='CHARGE');
+  $('cps').textContent=fr.cps!=null?fr.cps+'/s':'—';
+  $('uptime').textContent=hhmmss(fr.timestamp_ms);
+
+  // ---- gather cells ----
+  let cells=[]; fr.ics.forEach(ic=>ic.cells.forEach(c=>cells.push(c)));
+  const sm=fr.summary||{};
+  const vmin=sm.min ?? Math.min(...cells.map(c=>c.v));
+  const vmax=sm.max ?? Math.max(...cells.map(c=>c.v));
+  const total=sm.total ?? cells.reduce((a,c)=>a+c.v,0);
+  const avg=cells.length?cells.reduce((a,c)=>a+c.v,0)/cells.length:0;
+  const delta=(vmax-vmin)*1000;
+  const balN=cells.filter(c=>c.bal).length;
+  const cur=fr.adc?fr.adc.ts_curr:null;
+  const tmax=(fr.temp_summary&&fr.temp_summary.max!=null)?fr.temp_summary.max:null;
+  const tmin=(fr.temp_summary&&fr.temp_summary.min!=null)?fr.temp_summary.min:null;
+  // average cell temp (firmware only reports min/max, so derive it from per-cell temps)
+  const allTemps=[]; fr.ics.forEach(ic=>(ic.cell_temps||[]).forEach(t=>{ if(t!=null)allTemps.push(t); }));
+  const tavg=allTemps.length?allTemps.reduce((a,t)=>a+t,0)/allTemps.length:null;
+  const socEst=soc(vmin); // SoC of the weakest (lowest-voltage) cell — the limiting factor for the pack
+
+  // ---- metric tiles ----
+  const chgDir = cur==null?'' : (cur<-0.05?' ▼in':(cur>0.05?' ▲out':' idle'));
+  $('metrics').innerHTML=[
+    metricTile('Pack Voltage', fmt(total,2),'V', (total/(NCELLS*10*4.2)), 'var(--cyan)'),
+    metricTile('Current'+chgDir, fmt(cur==null?null:Math.abs(cur),2),'A', Math.min(1,Math.abs(cur||0)/14), cur<0?'var(--green)':'var(--amber)'),
+    metricTile('SoC est.', fmt(socEst,2),'%', socEst/100, 'var(--green)'),
+    metricTile('Cell Δ', fmt(delta,0),'mV', Math.min(1,delta/50), delta>30?'var(--red)':delta>15?'var(--amber)':'var(--green)'),
+    metricTile('Min Cell', fmt(vmin,3),'V', (vmin-2.5)/(4.2-2.5), 'var(--blue)'),
+    metricTile('Max Cell', fmt(vmax,3),'V', (vmax-2.5)/(4.2-2.5), 'var(--cyan)'),
+    metricTile('Min Temp', fmt(tmin,1),'°C', tmin==null?0:tmin/60, tmin>=50?'var(--red)':tmin>=40?'var(--amber)':'var(--green)'),
+    metricTile('Avg Temp', fmt(tavg,1),'°C', tavg==null?0:tavg/60, tavg>=50?'var(--red)':tavg>=40?'var(--amber)':'var(--green)'),
+    metricTile('Max Temp', fmt(tmax,1),'°C', tmax==null?0:tmax/60, tmax>=50?'var(--red)':tmax>=40?'var(--amber)':'var(--green)'),
+    metricTile('Balancing', balN,'cells', balN/140, 'var(--amber)'),
+  ].join('');
+  $('balCount').textContent=balN?`${balN} cells balancing ⚡`:'balanced';
+
+  // ---- legend ----
+  if(mode==='v'){
+    $('legLo').textContent='empty'; $('legHi').textContent='full  (SoC '+fmt(socEst,2)+'% avg)';
+    $('legScale').style.background=`linear-gradient(90deg,${socCol(0)},${socCol(.5)},${socCol(1)})`;
+  } else {
+    $('legLo').textContent=TEMP_LO+'°'; $('legHi').textContent=TEMP_HI+'°';
+    $('legScale').style.background=`linear-gradient(90deg,${palette(0)},${palette(.5)},${palette(1)})`;
+  }
+
+  // ---- cell matrix ----
+  fr.ics.forEach(ic=>{
+    let temps=ic.cell_temps||[];
+    ic.cells.forEach((c,ci)=>{
+      const el=$(`c${ic.index}_${ci}`); if(!el)return;
+      let t, txt, col;
+      const tp = temps[ci];
+      if(mode==='v'){
+        // colour by per-cell state of charge: red (empty) -> green (full)
+        t = soc(c.v)/100;
+        txt = c.v.toFixed(3); // full voltage e.g. "3.038"
+        col = socCol(t);
+      } else {
+        // colour on an absolute °C scale so near-identical temps stay near-identical colours
+        t = tp==null ? .5 : (tp-TEMP_LO)/(TEMP_HI-TEMP_LO);
+        txt = tp==null?'—':tp.toFixed(1);
+        col = palette(t);
+      }
+      el.style.background=col;
+      el.classList.toggle('bal', !!c.bal);
+      el.textContent=txt;
+      el.dataset.info=`<b>IC${ic.index} · C${ci}</b><br>${c.v.toFixed(3)} V`+
+        (tp!=null?`<br>${tp.toFixed(1)} °C`:'')+
+        (c.bal?'<br>⚡ balancing':'');
+    });
+    const stk=$('stk'+ic.index);
+    if(stk){ stk.innerHTML=`<b>${fmt(ic.stack_voltage,2)}</b>V<br><span style="color:var(--dimmer)">${fmt(ic.board_temp,0)}°</span>`; }
+  });
+
+  // ---- relays ----
+  const relOrder=['IR+','IR-','Prechg','SDC'];
+  const rel=fr.relays||{};
+  $('relays').innerHTML=relOrder.map(nm=>{
+    const s=rel[nm]||'off';
+    const cls=s==='on'?'on':s==='fault'?'fault':s==='warn'?'warn':'off';
+    return `<div class="relay"><span class="lamp ${cls}"></span><span class="nm">${nm}</span><span class="stt">${s}</span></div>`;
+  }).join('');
+
+  // ---- status kv ----
+  const adc=fr.adc||{}, dc=fr.dcdc||{};
+  const water=adc.water_sense;
+  $('statusKv').innerHTML=[
+    ['SDC voltage', fmt(adc.sdc_v,2)+' V'],
+    ['12V rail', fmt(adc['12v'],2)+' V'],
+    ['TS voltage', fmt(adc.ts_volt,1)+' V'],
+    ['TS current', fmt(adc.ts_curr,2)+' A'],
+    ['Water sense', fmt(water,2)+(water!=null&&water<1?' ⚠':'')],
+    ['DCDC', fmt(dc.voltage,1)+'V / '+fmt(dc.current,1)+'A'],
+  ].map(([k,v])=>`<div class="k">${k}</div><div class="v mono">${v}</div>`).join('');
+
+  // ---- faults ----
+  const verr=sm.errors||0, terr=(fr.temp_summary&&fr.temp_summary.errors)||0;
+  const bms=fr.bms_errors||'—';
+  const bmsBad = bms && /[1-9a-fA-F]/.test(bms);
+  const anyBad = verr>0||terr>0||bmsBad;
+  $('faultRight').textContent=anyBad?'⚠ attention':'all clear';
+  $('faultRight').style.color=anyBad?'var(--red)':'var(--green)';
+  $('faults').innerHTML=[
+    ['BMS errors', bms, bmsBad],
+    ['Voltage errors', verr, verr>0],
+    ['Temp errors', terr, terr>0],
+    ['UV / OV limits', `${fmt(sm.uv,2)} / ${fmt(sm.ov,2)} V`, false],
+  ].map(([k,v,bad])=>`<div class="k">${k}</div><div class="v mono badge-count" style="color:${bad?'var(--red)':'var(--txt)'}">${v}</div>`).join('');
+
+  // ---- charts ----
+  pushChart('V',total); pushChart('I',cur==null?null:cur); pushChart('T',tmax); pushChart('D',delta);
+  $('cV').textContent=fmt(total,1)+' V';
+  $('cI').textContent=fmt(cur,2)+' A';
+  $('cT').textContent=fmt(tmax,1)+' °C';
+  $('cD').textContent=fmt(delta,0)+' mV';
+}
+
+function setMode(m){ mode=m; $('modeV').classList.toggle('active',m==='v'); $('modeT').classList.toggle('active',m==='t');
+  if(lastFrame)render(lastFrame); }
+
+//================ charts (canvas ring buffers) ================
+const CH={V:[],I:[],T:[],D:[]}; const CHCOL={V:'#28e0d8',I:'#1fd47a',T:'#ffc24b',D:'#ff5b6e'}; const MAXPTS=160;
+function pushChart(k,v){ CH[k].push(v); if(CH[k].length>MAXPTS)CH[k].shift(); drawChart(k); }
+function drawChart(k){
+  const cv=$('ch'+k); if(!cv)return;
+  const dpr=devicePixelRatio||1; const w=cv.clientWidth,h=cv.clientHeight;
+  if(cv.width!==w*dpr||cv.height!==h*dpr){cv.width=w*dpr;cv.height=h*dpr;}
+  const ctx=cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+  const data=CH[k].filter(x=>x!=null); if(data.length<2)return;
+  let lo=Math.min(...data),hi=Math.max(...data); if(hi-lo<1e-6){hi+=1;lo-=1;}
+  const pad=(hi-lo)*0.15; lo-=pad; hi+=pad;
+  const X=i=>i/(CH[k].length-1)*w; const Y=v=>h-((v-lo)/(hi-lo))*(h-6)-3;
+  // area fill
+  ctx.beginPath(); let started=false;
+  CH[k].forEach((v,i)=>{ if(v==null)return; const x=X(i),y=Y(v); if(!started){ctx.moveTo(x,y);started=true;}else ctx.lineTo(x,y); });
+  const last=CH[k].length-1;
+  ctx.lineTo(X(last),h); ctx.lineTo(X(0),h); ctx.closePath();
+  const g=ctx.createLinearGradient(0,0,0,h); g.addColorStop(0,CHCOL[k]+'55'); g.addColorStop(1,CHCOL[k]+'00');
+  ctx.fillStyle=g; ctx.fill();
+  // line
+  ctx.beginPath(); started=false;
+  CH[k].forEach((v,i)=>{ if(v==null)return; const x=X(i),y=Y(v); if(!started){ctx.moveTo(x,y);started=true;}else ctx.lineTo(x,y); });
+  ctx.strokeStyle=CHCOL[k]; ctx.lineWidth=1.6; ctx.lineJoin='round'; ctx.stroke();
+  // last dot
+  const lv=data[data.length-1]; ctx.fillStyle=CHCOL[k];
+  ctx.beginPath(); ctx.arc(X(last),Y(lv),2.4,0,7); ctx.fill();
+}
+
+//================ command console ================
+function logLine(text,kind){
+  const el=$('log'); const d=document.createElement('div'); d.className='ln';
+  const ts=new Date().toLocaleTimeString();
+  d.innerHTML=`<span class="t">${ts}</span><span class="${kind}">${kind==='tx'?'» ':kind==='err'?'✗ ':kind==='sys'?'• ':'« '}${escapeHtml(text)}</span>`;
+  el.appendChild(d); el.scrollTop=el.scrollHeight;
+  while(el.childNodes.length>300)el.removeChild(el.firstChild);
+}
+function escapeHtml(s){return String(s).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]))}
+async function send(cmd){
+  logLine(cmd,'tx');
+  try{
+    const r=await fetch('/command',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd})});
+    if(!r.ok){const j=await r.json().catch(()=>({})); logLine('send failed: '+(j.err||r.status),'err');}
+  }catch(e){ logLine('send failed: '+e.message,'err'); }
+}
+function sendInput(){const i=$('cmd'); const v=i.value.trim(); if(v){send(v); i.value='';}}
+$('cmd').addEventListener('keydown',e=>{if(e.key==='Enter')sendInput();});
+function updateAmt(){$('chgAmt').textContent=Number($('chgRange').value).toFixed(1)+'A';}
+function sendCharge(){ // slider is in amps; firmware expects deci-amps (val*0.1), so send amps×10
+  const a=Number($('chgRange').value); send('state -c '+Math.round(a*10)); }
+
+//================ SSE stream ================
+function connect(){
+  const es=new EventSource('/stream');
+  es.onopen=()=>{$('connDot').className='dot on';$('connTxt').textContent='live';};
+  es.onerror=()=>{$('connDot').className='dot off';$('connTxt').textContent='reconnecting…';};
+  es.onmessage=ev=>{
+    let msg; try{msg=JSON.parse(ev.data);}catch(e){return;}
+    if(msg.type==='frame'){ render(msg.data); }
+    else if(msg.type==='log'){ logLine(msg.text, msg.kind==='tx'?'tx':msg.kind==='err'?'err':msg.kind==='sys'?'sys':'rx'); }
+  };
+}
+connect();
+updateAmt();
+logLine('Dashboard ready. Waiting for telemetry…','sys');
+</script>
+</body>
+</html>
